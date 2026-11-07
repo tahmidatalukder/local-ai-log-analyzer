@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local AI Security Log Analyzer</title>
+<style>
+:root{--bg:#f7f7f4;--fg:#1d2a22;--card:#fff;--line:#dcdcd4;--g:#2f4a3a}
+@media(prefers-color-scheme:dark){:root{--bg:#161a17;--fg:#e8ece9;--card:#202622;--line:#38403a;--g:#7fb095}}
+body{font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:16px;max-width:980px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+button{background:var(--g);color:#fff;border:0;border-radius:8px;padding:9px 14px;font-size:15px;cursor:pointer}
+button:disabled{opacity:.4}button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.bar{height:12px;background:var(--line);border-radius:6px;overflow:hidden}.bar>div{height:100%;background:var(--g);width:0;transition:width .3s}
+.sev{padding:2px 8px;border-radius:10px;color:#fff;font-size:12px}.Critical{background:#a4161a}.High{background:#d9480f}.Medium{background:#b08900}.Low{background:#4a6fa5}
+.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:6px;text-align:left;vertical-align:top}
+.muted{opacity:.7;font-size:13px}code{font-size:12px}
+</style></head><body>
+<h2>Local AI Security Log Analyzer</h2>
+<div class="card"><input type="file" id="f" accept=".log,.txt"> <button onclick="up()">Upload</button>
+<button id="go" onclick="post('start')" disabled>Start analysis</button> <button class="sec" onclick="post('stop')">Stop</button>
+<p id="msg" class="muted"></p></div>
+<div class="card"><div class="bar"><div id="b"></div></div>
+<p id="st" class="muted"></p><div class="tbl"><table id="calls"></table></div></div>
+<div class="card"><h3>Final report</h3><div id="rep" class="muted">No report yet.</div></div>
+<script>
+const $=id=>document.getElementById(id);
+async function up(){const f=$('f').files[0];if(!f){$('msg').textContent='Choose a .log or .txt file';return}
+ const fd=new FormData();fd.append('file',f);const r=await fetch('/api/upload',{method:'POST',body:fd});const j=await r.json();
+ $('msg').textContent=r.ok?`Uploaded ${j.filename}: ${j.lines} lines, ${j.chunks} parts`:('Error: '+(j.detail||r.status))}
+async function post(p){const r=await fetch('/api/'+p,{method:'POST'});if(!r.ok){const j=await r.json();$('msg').textContent='Error: '+j.detail}}
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function tick(){try{const s=await (await fetch('/api/status')).json();
+ $('go').disabled=!['ready','done','error','interrupted','stopped'].includes(s.status);
+ $('go').textContent=['interrupted','stopped'].includes(s.status)?'Resume':'Start analysis';
+ $('b').style.width=(s.total?100*s.done/s.total:0)+'%';
+ $('st').textContent=`${s.status} | part ${s.done}/${s.total} | model ${s.model} | app RAM ${s.ram_app_mb} MB | system RAM ${s.ram_system_pct}%`+(s.error?' | '+s.error:'');
+ $('calls').innerHTML='<tr><th>Part</th><th>Lines</th><th>Prompt tok</th><th>Time (s)</th><th>Findings</th><th>Note</th></tr>'+s.calls.map(c=>`<tr><td>${c.chunk}</td><td>${c.lines}</td><td>${c.prompt_tokens||'~'+c.est_prompt_tokens}</td><td>${c.seconds??''}</td><td>${c.findings}</td><td>${esc(c.error||(c.json_repaired?'JSON repaired':'')+(c.attempt>1?' retry':''))}</td></tr>`).join('');
+ if(s.report){$('rep').className='';$('rep').innerHTML=s.report.length?`<div class="tbl"><table><tr><th>Severity</th><th>Type</th><th>Entity</th><th>Evidence lines</th><th>Reason</th><th>Action</th></tr>`+s.report.map(r=>`<tr><td><span class="sev ${r.severity}">${r.severity}</span></td><td>${esc(r.attack_type)}<br><span class="muted">${esc(r.source)}</span></td><td><code>${esc(r.entity)}</code></td><td>${r.evidence_lines.join(', ')}</td><td>${esc(r.reason)}</td><td>${esc(r.suggested_action)}</td></tr>`).join('')+'</table></div>':'No attacks found.'}
+}catch(e){}}
+setInterval(tick,1500);tick();
+</script></body></html>
